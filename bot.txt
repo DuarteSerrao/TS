@@ -1,0 +1,5 @@
+name: TS-2FA
+username: TS_2FA_Telegram_bot
+token: 5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y
+
+http://t.me/TS_2FA_Telegram_bot
