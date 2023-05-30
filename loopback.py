@@ -38,7 +38,7 @@ class Loopback(LoggingMixIn, Operations):
 	chmod = os.chmod
 	chown = os.chown
 
-	def create(self, path, mode):
+	def create(self, path, mode, fi=None):
 		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
 
 	def flush(self, path, fh):
