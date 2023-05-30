@@ -8,7 +8,19 @@ from errno import EACCES
 from os.path import realpath
 from threading import Lock
 
-from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
+from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
+
+
+"""
+Setup:
+pip install fusepy
+sudo apt install python3-fusepy
+
+Run with:
+sudo python3 loopback.py root/ mount/
+
+mount will now have root/ files
+"""
 
 
 class Loopback(LoggingMixIn, Operations):
