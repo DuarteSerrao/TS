@@ -1,8 +1,8 @@
-import os
-import random
-import string
 
 import telebot
+
+import random
+import string
 
 
 """
@@ -12,6 +12,7 @@ pip install pyTelegramBotAPI
 Run with:
 sudo python3 telegram_module.py
 """
+
 
 bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 
@@ -50,7 +51,7 @@ def welcome_message(message):
 			user: {user}
 			chat_id: {chat_id}
 		"""
-	                 )
+	)
 
 
 @bot.message_handler(commands=['reset'])
