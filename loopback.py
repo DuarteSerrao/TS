@@ -20,7 +20,7 @@ import string
 
 """
 Setup:
-pip install fusepy pyTelegramBotAPI
+sudo pip install fusepy pyTelegramBotAPI
 sudo apt install python3-fusepy
 
 Run with:
