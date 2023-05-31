@@ -31,39 +31,40 @@ mount will now have root/ files
 
 
 class Loopback(LoggingMixIn, Operations):
-	def __init__(self, root):
-		self.root = realpath(root)
-		self.rwlock = Lock()
+    def __init__(self, root):
+        self.root = realpath(root)
+        self.rwlock = Lock()
 
-		self.cached_chat_id = {}
+        self.cached_chat_id = {}
 
-		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
-		self.bot = bot
-		bot_thread = Thread(target=self._start_bot)
-		bot_thread.start()
+        bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
+        self.bot = bot
+        bot_thread = Thread(target=self._start_bot)
+        bot_thread.start()
 
-		@bot.message_handler(commands=['start'])
-		def welcome_message(message):
-			if message.chat.type != "private":
-				bot.send_message(message.chat.id, "**It's not a good idea to use me on a public chat**")
-				return
+        @bot.message_handler(commands=['start'])
+        def welcome_message(message):
+            if message.chat.type != "private":
+                bot.send_message(
+                    message.chat.id, "**It's not a good idea to use me on a public chat**")
+                return
 
-			user = message.from_user.first_name
-			chat_id = message.chat.id
+            user = message.from_user.first_name
+            chat_id = message.chat.id
 
-			if user in self.cached_chat_id:
-				bot.send_message(chat_id, f"""
+            if user in self.cached_chat_id:
+                bot.send_message(chat_id, f"""
 					User already cached:
 						user_id: {user}
 						chat_id: {chat_id}
 					"""
-				)
-				return
+                                 )
+                return
 
-			self.cached_chat_id[user] = chat_id
-			info(" + " + str((user, chat_id)))
+            self.cached_chat_id[user] = chat_id
+            info(" + " + str((user, chat_id)))
 
-			bot.send_message(chat_id, f"""
+            bot.send_message(chat_id, f"""
 				I'm a simple bot used to send OTP codes for 2FA. I'm **not interactive**.
 				Available commands:
 					- /start to cache user entry if not already cached
@@ -74,124 +75,132 @@ class Loopback(LoggingMixIn, Operations):
 					user: {user}
 					chat_id: {chat_id}
 				"""
-			)
+                             )
 
-		@bot.message_handler(commands=['reset'])
-		def remove_user(message):
-			user = message.from_user.first_name
-			chat_id = self.cached_chat_id[user]
+        @bot.message_handler(commands=['reset'])
+        def remove_user(message):
+            user = message.from_user.first_name
+            chat_id = self.cached_chat_id[user]
 
-			self.cached_chat_id.pop(user)
-			info(" - " + str((user, chat_id)))
+            self.cached_chat_id.pop(user)
+            info(" - " + str((user, chat_id)))
 
-			bot.send_message(message.chat.id, "Entry removed.")
+            bot.send_message(message.chat.id, "Entry removed.")
 
-		def _randomword(length):
-			letters_lc = string.ascii_lowercase
-			letters_uc = string.ascii_uppercase
-			numbers = "0123456789"
+        def _randomword(length):
+            letters_lc = string.ascii_lowercase
+            letters_uc = string.ascii_uppercase
+            numbers = "0123456789"
 
-			return ''.join(random.choice(letters_lc + letters_uc + numbers) for _ in range(length))
+            return ''.join(random.choice(letters_lc + letters_uc + numbers) for _ in range(length))
 
-		@bot.message_handler(commands=['code'])
-		def send_code(message):
-			user = message.from_user.first_name
-			if user not in self.cached_chat_id:
-				self.bot.send_message(message.chat.id, "User not in cache. Use /start.")
-				return
-			self._send_code(user, _randomword(10))
+        @bot.message_handler(commands=['code'])
+        def send_code(message):
+            user = message.from_user.first_name
+            if user not in self.cached_chat_id:
+                self.bot.send_message(
+                    message.chat.id, "User not in cache. Use /start.")
+                return
+            self._send_code(user, _randomword(10))
 
-	def _start_bot(self):
-		self.bot.infinity_polling()
+    def _notify_users(self, path):
+        for user, chat_id in self.cached_chat_id.items():
+            self.bot.send_message(chat_id, f"File {path} has been opened.")
 
-	def _send_code(self, user, code):
-		self.bot.send_message(self.cached_chat_id[user], code)
+    def _start_bot(self):
+        self.bot.infinity_polling()
 
-	def __call__(self, op, path, *args):
-		return super(Loopback, self).__call__(op, self.root + path, *args)
+    def _send_code(self, user, code):
+        self.bot.send_message(self.cached_chat_id[user], code)
 
-	def access(self, path, mode):
-		if not os.access(path, mode):
-			raise FuseOSError(EACCES)
+    def __call__(self, op, path, *args):
+        return super(Loopback, self).__call__(op, self.root + path, *args)
 
-	chmod = os.chmod
-	chown = os.chown
+    def access(self, path, mode):
+        if not os.access(path, mode):
+            raise FuseOSError(EACCES)
 
-	def create(self, path, mode, fi=None):
-		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    chmod = os.chmod
+    chown = os.chown
 
-	def flush(self, path, fh):
-		return os.fsync(fh)
+    def create(self, path, mode, fi=None):
+        return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
 
-	def fsync(self, path, datasync, fh):
-		if datasync != 0:
-			return os.fdatasync(fh)
-		else:
-			return os.fsync(fh)
+    def flush(self, path, fh):
+        return os.fsync(fh)
 
-	def getattr(self, path, fh=None):
-		st = os.lstat(path)
-		return dict((key, getattr(st, key)) for key in (
-			'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
-			'st_nlink', 'st_size', 'st_uid'))
+    def fsync(self, path, datasync, fh):
+        if datasync != 0:
+            return os.fdatasync(fh)
+        else:
+            return os.fsync(fh)
 
-	getxattr = None
+    def getattr(self, path, fh=None):
+        st = os.lstat(path)
+        return dict((key, getattr(st, key)) for key in (
+            'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
+            'st_nlink', 'st_size', 'st_uid'))
 
-	def link(self, target, source):
-		return os.link(self.root + source, target)
+    getxattr = None
 
-	listxattr = None
-	mkdir = os.mkdir
-	mknod = os.mknod
-	open = os.open
+    def link(self, target, source):
+        return os.link(self.root + source, target)
 
-	def read(self, path, size, offset, fh):
-		with self.rwlock:
-			os.lseek(fh, offset, 0)
-			return os.read(fh, size)
+    listxattr = None
+    mkdir = os.mkdir
+    mknod = os.mknod
 
-	def readdir(self, path, fh):
-		return ['.', '..'] + os.listdir(path)
+    def open(self, path, flags):
+        self._notify_users(path)
+        return os.open(path, flags)
 
-	readlink = os.readlink
+    def read(self, path, size, offset, fh):
+        with self.rwlock:
+            os.lseek(fh, offset, 0)
+            return os.read(fh, size)
 
-	def release(self, path, fh):
-		return os.close(fh)
+    def readdir(self, path, fh):
+        return ['.', '..'] + os.listdir(path)
 
-	def rename(self, old, new):
-		return os.rename(old, self.root + new)
+    readlink = os.readlink
 
-	rmdir = os.rmdir
+    def release(self, path, fh):
+        return os.close(fh)
 
-	def statfs(self, path):
-		stv = os.statvfs(path)
-		return dict((key, getattr(stv, key)) for key in (
-			'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
-			'f_ffree', 'f_files', 'f_flag', 'f_frsize', 'f_namemax'))
+    def rename(self, old, new):
+        return os.rename(old, self.root + new)
 
-	def symlink(self, target, source):
-		return os.symlink(source, target)
+    rmdir = os.rmdir
 
-	def truncate(self, path, length, fh=None):
-		with open(path, 'r+') as f:
-			f.truncate(length)
+    def statfs(self, path):
+        stv = os.statvfs(path)
+        return dict((key, getattr(stv, key)) for key in (
+            'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
+            'f_ffree', 'f_files', 'f_flag', 'f_frsize', 'f_namemax'))
 
-	unlink = os.unlink
-	utimens = os.utime
+    def symlink(self, target, source):
+        return os.symlink(source, target)
 
-	def write(self, path, data, offset, fh):
-		with self.rwlock:
-			os.lseek(fh, offset, 0)
-			return os.write(fh, data)
+    def truncate(self, path, length, fh=None):
+        with open(path, 'r+') as f:
+            f.truncate(length)
+
+    unlink = os.unlink
+    utimens = os.utime
+
+    def write(self, path, data, offset, fh):
+        with self.rwlock:
+            os.lseek(fh, offset, 0)
+            return os.write(fh, data)
 
 
 if __name__ == '__main__':
-	import argparse
-	parser = argparse.ArgumentParser()
-	parser.add_argument('root')
-	parser.add_argument('mount')
-	args = parser.parse_args()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('root')
+    parser.add_argument('mount')
+    args = parser.parse_args()
 
-	logging.basicConfig(level=logging.INFO)
-	fuse = FUSE(
-		Loopback(args.root), args.mount, foreground=True, allow_other=True)
+    logging.basicConfig(level=logging.INFO)
+    fuse = FUSE(
+        Loopback(args.root), args.mount, foreground=True, allow_other=True)
