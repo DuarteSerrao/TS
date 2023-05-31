@@ -79,15 +79,15 @@ class Loopback(LoggingMixIn, Operations):
 			code = message.text.split(" ")[1]  # /code lsdhfkhdf
 			self.received_codes[user] = code
 
-	def _notify_users(self, path):
-		for user, chat_id in self.cached_chat_id.items():
-			self.bot.send_message(chat_id, f"File {path} has been opened.")
-
 	def _start_bot(self):
 		self.bot.infinity_polling()
 
 	def _send_message(self, user, msg):
 		self.bot.send_message(self.cached_chat_id[user], msg)
+
+	def _notify_users(self, msg):
+		for chat_id in self.cached_chat_id.values():
+			self.bot.send_message(chat_id, msg)
 
 	def _send_code_and_await(self, user, code):
 		self._send_message(user, f"Your code is {code}. Please respond within 60 seconds.")
