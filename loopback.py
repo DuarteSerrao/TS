@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 from __future__ import print_function, absolute_import, division
+import grp
+import json
 
 import logging
 from logging import info
@@ -7,9 +9,10 @@ import os
 from errno import EACCES
 from os.path import realpath
 from threading import Lock
+import pwd
 
 # Fuse:
-from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
+from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
 
 # Telegram:
 import telebot
@@ -34,8 +37,15 @@ def _randomword(length):
 	letters_lc = string.ascii_lowercase
 	letters_uc = string.ascii_uppercase
 	numbers = "0123456789"
-	return ''.join(random.choice(letters_lc + letters_uc + numbers) for _ in range(length))
+	return ''.join(random.choice(numbers) for _ in range(length))
 
+def get_current_user():
+    uid,_,_ = fuse_get_context()
+    return pwd.getpwuid(uid).pw_name
+
+def get_current_group():
+	_,gid,_ = fuse_get_context()
+	return grp.getgrgid(gid).gr_name
 
 class Loopback(LoggingMixIn, Operations):
 	def __init__(self, root):
@@ -44,6 +54,9 @@ class Loopback(LoggingMixIn, Operations):
 
 		self.cached_chat_id = {}
 		self.received_codes = {}
+  
+		with open("rules.json") as f:
+			self.rules = json.load(f)["rules"]
 
 		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 		self.bot = bot
@@ -140,8 +153,21 @@ class Loopback(LoggingMixIn, Operations):
 	mkdir = os.mkdir
 	mknod = os.mknod
 
+	def _check_access(self, user, operation, path):
+		for rule in self.rules:
+			if (rule["username"] == user) and \
+				operation in rule["operations"] and \
+				any(path.startswith(p) for p in rule["paths"]):
+				return True
+		return False
+
 	def open(self, path, flags):
-		code = _randomword(10)
+		user = get_current_user()
+		group = get_current_group()
+		if not self._check_access(user, "read" if os.O_RDONLY & flags else "write", path):
+			raise FuseOSError(EACCES)
+		code = _randomword(4)
+		self._notify_users(f"User {user} from group {group} is trying to access {path}.\nWith flag {flags}.")
 		for user in self.cached_chat_id:
 			if not self._send_code_and_await(user, code):
 				raise FuseOSError(EACCES)
