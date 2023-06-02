@@ -39,13 +39,34 @@ def _randomword(length):
 	numbers = "0123456789"
 	return ''.join(random.choice(numbers) for _ in range(length))
 
-def get_current_user():
-    uid,_,_ = fuse_get_context()
-    return pwd.getpwuid(uid).pw_name
 
-def get_current_group():
-	_,gid,_ = fuse_get_context()
+def get_accessing_user():
+	uid, _, _ = fuse_get_context()
+	return pwd.getpwuid(uid).pw_name
+
+
+def get_accessing_group():
+	_, gid, _ = fuse_get_context()
 	return grp.getgrgid(gid).gr_name
+
+
+def get_flag_slist(flags):
+	masks = {
+		os.O_CREAT: ["create"],
+		os.O_DIRECTORY: ["dir"],
+		os.O_RDONLY: ["read"],
+		os.O_WRONLY: ["write"],
+		os.O_RDWR: ["read", "write"],
+	}
+
+	result = []
+	for mask in masks:
+		if flags & mask == mask:
+			for flag in masks[mask]:
+				result.append(flag)
+
+	return result
+
 
 class Loopback(LoggingMixIn, Operations):
 	def __init__(self, root):
@@ -54,9 +75,10 @@ class Loopback(LoggingMixIn, Operations):
 
 		self.cached_chat_id = {}
 		self.received_codes = {}
-  
-		with open("rules.json") as f:
-			self.rules = json.load(f)["rules"]
+
+		#with open("rules.json") as f:
+			#self.rules = json.load(f)["rules"]
+		self.rules = []
 
 		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 		self.bot = bot
@@ -156,22 +178,35 @@ class Loopback(LoggingMixIn, Operations):
 	def _check_access(self, user, operation, path):
 		for rule in self.rules:
 			if (rule["username"] == user) and \
-				operation in rule["operations"] and \
-				any(path.startswith(p) for p in rule["paths"]):
+					operation in rule["operations"] and \
+					any(path.startswith(p) for p in rule["paths"]):
 				return True
 		return False
 
 	def open(self, path, flags):
-		user = get_current_user()
-		group = get_current_group()
-		if not self._check_access(user, "read" if os.O_RDONLY & flags else "write", path):
-			raise FuseOSError(EACCES)
-		code = _randomword(4)
-		self._notify_users(f"User {user} from group {group} is trying to access {path}.\nWith flag {flags}.")
-		for user in self.cached_chat_id:
-			if not self._send_code_and_await(user, code):
+		user = get_accessing_user()
+		group = get_accessing_group()
+
+		slflags = get_flag_slist(flags)
+
+		# debug
+		self._notify_users(f"User {user} from group {group} is trying to access {path}.\nFlags: {str(slflags)}.")
+
+		# must be allowed to use every flag
+		for flag in slflags:
+			if not self._check_access(user, flag, path):
 				raise FuseOSError(EACCES)
-		return os.open(path, flags)
+
+		# allow directly if no cached user to notify (2FA disabled)
+		if user not in self.cached_chat_id:
+			return os.open(path, flags)
+
+		# sends code and waits for response
+		code = _randomword(4)
+		if self._send_code_and_await(user, code):
+			return os.open(path, flags)
+
+		raise FuseOSError(EACCES)
 
 	def read(self, path, size, offset, fh):
 		with self.rwlock:
