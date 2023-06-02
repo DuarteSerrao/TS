@@ -1,0 +1,17 @@
+[
+  {
+    "username": "Diogo",
+    "operations": ["read"],
+    "paths": ["/"]
+  },
+  {
+    "username": "Vasco",
+    "operations": ["read", "write"],
+    "paths": ["/vasco/"]
+  },
+  {
+    "username": "kali",
+    "operations": ["read", "write"],
+    "paths": ["/"]
+  }
+]

@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 from __future__ import print_function, absolute_import, division
-import grp
-import json
 
 import logging
 from logging import info
+
+# Fuse:
+from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
 import os
 from errno import EACCES
 from os.path import realpath
 from threading import Lock
 import pwd
-
-# Fuse:
-from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
+import grp
+import json
 
 # Telegram:
 import telebot
@@ -77,8 +77,7 @@ class Loopback(LoggingMixIn, Operations):
 		self.received_codes = {}
 
 		#with open("rules.json") as f:
-			#self.rules = json.load(f)["rules"]
-		self.rules = []
+		#	self.rules = json.load(f)
 
 		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 		self.bot = bot
@@ -176,10 +175,14 @@ class Loopback(LoggingMixIn, Operations):
 	mknod = os.mknod
 
 	def _check_access(self, user, operation, path):
+		# Read every time
+		with open("rules.json") as f:
+			self.rules = json.load(f)
+
 		for rule in self.rules:
 			if (rule["username"] == user) and \
 					operation in rule["operations"] and \
-					any(path.startswith(p) for p in rule["paths"]):
+					any(path.startswith(self.root + p) for p in rule["paths"]):
 				return True
 		return False
 
