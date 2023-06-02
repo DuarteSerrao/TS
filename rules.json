@@ -1,17 +1,25 @@
-[
-  {
-    "username": "Diogo",
-    "operations": ["read"],
-    "paths": ["/"]
-  },
-  {
-    "username": "Vasco",
-    "operations": ["read", "write"],
-    "paths": ["/vasco/"]
-  },
-  {
-    "username": "kali",
-    "operations": ["read", "write"],
-    "paths": ["/"]
+{
+  "rules": [
+    {
+      "username": "Vasco",
+      "operations": ["read", "write"],
+      "paths": ["/vasco"],
+      "explicit_auth_required": 5104810515
+    },
+    {
+      "username": "Diogo",
+      "operations": ["read"],
+      "paths": ["/"],
+      "explicit_auth_required": 1687790372
+    },
+    {
+      "username": "kali",
+      "operations": ["read", "write", "create", "delete"],
+      "paths": ["/"],
+      "explicit_auth_required": false
+    }
+  ],
+  "auth_config": {
+    "timeout": 60
   }
-]
+}

@@ -76,36 +76,25 @@ class Loopback(LoggingMixIn, Operations):
 		self.cached_chat_id = {}
 		self.received_codes = {}
 
-		#with open("rules.json") as f:
-		#	self.rules = json.load(f)
+		# Just checking if it's valid
+		with open("rules.json") as f:
+			self.rules = json.load(f)
 
 		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 		self.bot = bot
 		bot_thread = Thread(target=self._start_bot)
 		bot_thread.start()
+		info("Telegram bot started")
 
 		@bot.message_handler(commands=['start'])
 		def welcome_message(message):
 			user = message.from_user.first_name
 			chat_id = message.chat.id
 
-			if user in self.cached_chat_id:
-				return
-
 			self.cached_chat_id[user] = chat_id
 			info(" + " + str((user, chat_id)))
 
-			bot.send_message(chat_id, f"Entry added:\nuser: {user}\nchat_id: {chat_id}")
-
-		@bot.message_handler(commands=['reset'])
-		def remove_user(message):
-			user = message.from_user.first_name
-			chat_id = self.cached_chat_id[user]
-
-			self.cached_chat_id.pop(user)
-			info(" - " + str((user, chat_id)))
-
-			bot.send_message(message.chat.id, "Entry removed.")
+			bot.send_message(chat_id, f"user: {user}\nchat_id: {chat_id}")
 
 		@bot.message_handler(commands=['code'])
 		def receive_code(message):
@@ -124,9 +113,13 @@ class Loopback(LoggingMixIn, Operations):
 			self.bot.send_message(chat_id, msg)
 
 	def _send_code_and_await(self, user, code):
-		self._send_message(user, f"Your code is {code}. Please respond within 60 seconds.")
+		with open("rules.json") as f:
+			timeout = json.load(f)["auth_config"]["timeout"]
+
+		self._send_message(user, f"Your code is {code}. Please respond within {timeout} seconds.")
+
 		start_time = time.time()
-		while time.time() - start_time < 60:  # wait 60s
+		while time.time() - start_time < timeout:  # wait according to the timeout value
 			if user not in self.received_codes:
 				time.sleep(1)
 			elif self.received_codes.get(user) == code:
@@ -137,18 +130,128 @@ class Loopback(LoggingMixIn, Operations):
 				return False
 		return False
 
+	def _check_access(self, user, operation, path, root=None):
+		if root is None:
+			root = self.root
+
+		# Read every time
+		with open("rules.json") as f:
+			self.rules = json.load(f)["rules"]
+
+		for rule in self.rules:
+			if (rule["username"] == user) and \
+					operation in rule["operations"] and \
+					any(path.startswith(root + p) for p in rule["paths"]):
+				return True
+		return False
+	
+
 	def __call__(self, op, path, *args):
+		print(op, path, args)
 		return super(Loopback, self).__call__(op, self.root + path, *args)
+
+
+	# === CREATE ===
+	def create(self, path, mode, fi=None):
+		if not self._check_access(get_accessing_user(), "create", path):
+			raise FuseOSError(EACCES)
+		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+	
+	def mkdir(self, path, mode):
+		if not self._check_access(get_accessing_user(), "create", path):
+			raise FuseOSError(EACCES)
+		return os.mkdir(path, mode)
+	
+	def mknod(self, path, mode):
+		if not self._check_access(get_accessing_user(), "create", path):
+			raise FuseOSError(EACCES)
+		return os.mknod(path, mode)
+
+	def link(self, target, source):
+		if not self._check_access(get_accessing_user(), "create", source):
+			raise FuseOSError(EACCES)
+		return os.link(self.root + source, target)
+
+	def symlink(self, target, source):
+		if not self._check_access(get_accessing_user(), "create", source):
+			raise FuseOSError(EACCES)
+		return os.symlink(source, target)
+
+
+	# === DELETE ===
+	def rmdir(self, path):
+		if not self._check_access(get_accessing_user(), "delete", path):
+			raise FuseOSError(EACCES)
+		return os.rmdir(path)
+	
+	def unlink(self, path):
+		if not self._check_access(get_accessing_user(), "delete", path):
+			raise FuseOSError(EACCES)
+		return os.unlink(path)
+
+
+	# === READ ===
+	def read(self, path, size, offset, fh):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		with self.rwlock:
+			os.lseek(fh, offset, 0)
+			return os.read(fh, size)
+
+	def readdir(self, path, fh):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		return ['.', '..'] + os.listdir(path)
+	
+	def readlink(self, path):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		return os.readlink(path)
+
+
+	# === WRITE ===
+	def chmod(self, path, mode):
+		if not self._check_access(get_accessing_user(), "write", path):
+			raise FuseOSError(EACCES)
+		return os.chmod(path, mode)
+	
+	def chown(self, path, mode):
+		if not self._check_access(get_accessing_user(), "write", path):
+			raise FuseOSError(EACCES)
+		return os.chown(path, mode)
+
+	def rename(self, old, new):
+		if not self._check_access(get_accessing_user(), "write", old, root=""):
+			raise FuseOSError(EACCES)
+		return os.rename(old, self.root + new)
+
+	def write(self, path, data, offset, fh):
+		if not self._check_access(get_accessing_user(), "write", path):
+			raise FuseOSError(EACCES)
+		with self.rwlock:
+			os.lseek(fh, offset, 0)
+			return os.write(fh, data)
+
+	def truncate(self, path, length, fh=None):
+		if not self._check_access(get_accessing_user(), "write", path):
+			raise FuseOSError(EACCES)
+		with open(path, 'r+') as f:
+			f.truncate(length)
+
+
+
+
+
+
+
+
+
+
+
 
 	def access(self, path, mode):
 		if not os.access(path, mode):
 			raise FuseOSError(EACCES)
-
-	chmod = os.chmod
-	chown = os.chown
-
-	def create(self, path, mode, fi=None):
-		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
 
 	def flush(self, path, fh):
 		return os.fsync(fh)
@@ -158,7 +261,7 @@ class Loopback(LoggingMixIn, Operations):
 			return os.fdatasync(fh)
 		else:
 			return os.fsync(fh)
-
+		
 	def getattr(self, path, fh=None):
 		st = os.lstat(path)
 		return dict((key, getattr(st, key)) for key in (
@@ -167,24 +270,7 @@ class Loopback(LoggingMixIn, Operations):
 
 	getxattr = None
 
-	def link(self, target, source):
-		return os.link(self.root + source, target)
-
 	listxattr = None
-	mkdir = os.mkdir
-	mknod = os.mknod
-
-	def _check_access(self, user, operation, path):
-		# Read every time
-		with open("rules.json") as f:
-			self.rules = json.load(f)
-
-		for rule in self.rules:
-			if (rule["username"] == user) and \
-					operation in rule["operations"] and \
-					any(path.startswith(self.root + p) for p in rule["paths"]):
-				return True
-		return False
 
 	def open(self, path, flags):
 		user = get_accessing_user()
@@ -211,23 +297,8 @@ class Loopback(LoggingMixIn, Operations):
 
 		raise FuseOSError(EACCES)
 
-	def read(self, path, size, offset, fh):
-		with self.rwlock:
-			os.lseek(fh, offset, 0)
-			return os.read(fh, size)
-
-	def readdir(self, path, fh):
-		return ['.', '..'] + os.listdir(path)
-
-	readlink = os.readlink
-
 	def release(self, path, fh):
 		return os.close(fh)
-
-	def rename(self, old, new):
-		return os.rename(old, self.root + new)
-
-	rmdir = os.rmdir
 
 	def statfs(self, path):
 		stv = os.statvfs(path)
@@ -235,20 +306,9 @@ class Loopback(LoggingMixIn, Operations):
 			'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
 			'f_ffree', 'f_files', 'f_flag', 'f_frsize', 'f_namemax'))
 
-	def symlink(self, target, source):
-		return os.symlink(source, target)
-
-	def truncate(self, path, length, fh=None):
-		with open(path, 'r+') as f:
-			f.truncate(length)
-
-	unlink = os.unlink
 	utimens = os.utime
 
-	def write(self, path, data, offset, fh):
-		with self.rwlock:
-			os.lseek(fh, offset, 0)
-			return os.write(fh, data)
+
 
 
 if __name__ == '__main__':
