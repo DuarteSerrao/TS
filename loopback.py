@@ -147,7 +147,8 @@ class Loopback(LoggingMixIn, Operations):
 	
 
 	def __call__(self, op, path, *args):
-		print(op, path, args)
+		if op not in ["init", "getattr", "opendir", "readdir", "releasedir"]:
+			info(f"{get_accessing_user()} {op}{str(args)} {path}")
 		return super(Loopback, self).__call__(op, self.root + path, *args)
 
 
@@ -161,11 +162,11 @@ class Loopback(LoggingMixIn, Operations):
 		if not self._check_access(get_accessing_user(), "create", path):
 			raise FuseOSError(EACCES)
 		return os.mkdir(path, mode)
-	
-	def mknod(self, path, mode):
+
+	def mknod(self, path, mode, dev):
 		if not self._check_access(get_accessing_user(), "create", path):
 			raise FuseOSError(EACCES)
-		return os.mknod(path, mode)
+		return os.mknod(path, mode, dev)
 
 	def link(self, target, source):
 		if not self._check_access(get_accessing_user(), "create", source):
@@ -191,6 +192,39 @@ class Loopback(LoggingMixIn, Operations):
 
 
 	# === READ ===
+	def access(self, path, mode):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		#if not os.access(path, mode):
+		#	raise FuseOSError(EACCES)
+
+	def flush(self, path, fh):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		return os.fsync(fh)
+
+	def fsync(self, path, datasync, fh):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		if datasync != 0:
+			return os.fdatasync(fh)
+		else:
+			return os.fsync(fh)
+
+	def getattr(self, path, fh=None):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		st = os.lstat(path)
+		return dict((key, getattr(st, key)) for key in (
+			'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
+			'st_nlink', 'st_size', 'st_uid'))
+
+	def getxattr(self, path, name, position=0):
+		return None
+
+	def listxattr(self, path):
+		return None
+
 	def read(self, path, size, offset, fh):
 		if not self._check_access(get_accessing_user(), "read", path):
 			raise FuseOSError(EACCES)
@@ -208,17 +242,28 @@ class Loopback(LoggingMixIn, Operations):
 			raise FuseOSError(EACCES)
 		return os.readlink(path)
 
+	def statfs(self, path):
+		if not self._check_access(get_accessing_user(), "read", path):
+			raise FuseOSError(EACCES)
+		stv = os.statvfs(path)
+		return dict((key, getattr(stv, key)) for key in (
+			'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
+			'f_ffree', 'f_files', 'f_flag', 'f_frsize', 'f_namemax'))
+
+	def utimens(self, path, times=None):
+		return os.utime(path, times)
+
 
 	# === WRITE ===
 	def chmod(self, path, mode):
 		if not self._check_access(get_accessing_user(), "write", path):
 			raise FuseOSError(EACCES)
 		return os.chmod(path, mode)
-	
-	def chown(self, path, mode):
+
+	def chown(self, path, uid, gid):
 		if not self._check_access(get_accessing_user(), "write", path):
 			raise FuseOSError(EACCES)
-		return os.chown(path, mode)
+		return os.chown(path, uid, gid)
 
 	def rename(self, old, new):
 		if not self._check_access(get_accessing_user(), "write", old, root=""):
@@ -239,39 +284,7 @@ class Loopback(LoggingMixIn, Operations):
 			f.truncate(length)
 
 
-
-
-
-
-
-
-
-
-
-
-	def access(self, path, mode):
-		if not os.access(path, mode):
-			raise FuseOSError(EACCES)
-
-	def flush(self, path, fh):
-		return os.fsync(fh)
-
-	def fsync(self, path, datasync, fh):
-		if datasync != 0:
-			return os.fdatasync(fh)
-		else:
-			return os.fsync(fh)
-		
-	def getattr(self, path, fh=None):
-		st = os.lstat(path)
-		return dict((key, getattr(st, key)) for key in (
-			'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
-			'st_nlink', 'st_size', 'st_uid'))
-
-	getxattr = None
-
-	listxattr = None
-
+	# === OTHER ===
 	def open(self, path, flags):
 		user = get_accessing_user()
 		group = get_accessing_group()
@@ -299,16 +312,6 @@ class Loopback(LoggingMixIn, Operations):
 
 	def release(self, path, fh):
 		return os.close(fh)
-
-	def statfs(self, path):
-		stv = os.statvfs(path)
-		return dict((key, getattr(stv, key)) for key in (
-			'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
-			'f_ffree', 'f_files', 'f_flag', 'f_frsize', 'f_namemax'))
-
-	utimens = os.utime
-
-
 
 
 if __name__ == '__main__':
