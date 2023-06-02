@@ -1,0 +1,85 @@
+{
+  "auth_config": {
+    "timeout": 60
+  },
+  "contacts": {
+    "Vasco": 5104810515,
+    "Diogo": 1687790372
+  },
+  "rules": [
+    {
+      "match": {
+        "user": "Vasco",
+        "path": "/vasco/",
+        "operation": "read"
+      },
+      "actions": {
+        "notify": "Diogo",
+        "allow": true
+      }
+    },
+    {
+      "match": {
+        "user": "Vasco",
+        "path": "/vasco/",
+        "operation": "write"
+      },
+      "actions": {
+        "notify": "Diogo",
+        "allow": true
+      }
+    },
+    {
+      "match": {
+        "user": "Diogo",
+        "path": "/",
+        "operation": "read"
+      },
+      "actions": {
+        "notify": "Vasco",
+        "allow": true,
+        "request_auth": "Diogo"
+      }
+    },
+    {
+      "match": {
+        "user": "kali",
+        "path": "/",
+        "operation": "read"
+      },
+      "actions": {
+        "allow": true
+      }
+    },
+    {
+      "match": {
+        "user": "kali",
+        "path": "/",
+        "operation": "write"
+      },
+      "actions": {
+        "allow": true
+      }
+    },
+    {
+      "match": {
+        "user": "kali",
+        "path": "/",
+        "operation": "create"
+      },
+      "actions": {
+        "allow": true
+      }
+    },
+    {
+      "match": {
+        "user": "kali",
+        "path": "/",
+        "operation": "delete"
+      },
+      "actions": {
+        "allow": true
+      }
+    }
+  ]
+}
