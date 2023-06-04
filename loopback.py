@@ -50,24 +50,6 @@ def get_accessing_group():
 	return grp.getgrgid(gid).gr_name
 
 
-def get_flag_slist(flags):
-	masks = {
-		os.O_CREAT: ["create"],
-		os.O_DIRECTORY: ["dir"],
-		os.O_RDONLY: ["read"],
-		os.O_WRONLY: ["write"],
-		os.O_RDWR: ["read", "write"],
-	}
-
-	result = []
-	for mask in masks:
-		if flags & mask == mask:
-			for flag in masks[mask]:
-				result.append(flag)
-
-	return result
-
-
 class Loopback(LoggingMixIn, Operations):
 	def __init__(self, root):
 		self.root = realpath(root)
@@ -156,18 +138,18 @@ class Loopback(LoggingMixIn, Operations):
 
 	def _matches(self, user, operation, path, match):
 
-		muser = match.get("user")
-		mop = match.get("operation")
-		mpath = match.get("path")
+		musers = match.get("users")
+		mops = match.get("operations")
+		mpaths = match.get("paths")
 
-		if muser is not None:
-			if muser != user:
+		if musers is not None:
+			if user not in musers:
 				return False
-		if mop is not None:
-			if mop != operation:
+		if mops is not None:
+			if operation not in mops:
 				return False
-		if mpath is not None:
-			if not str(path).startswith(mpath):
+		if mpaths is not None:
+			if not any(path.startswith(mpath) for mpath in mpaths):
 				return False
 		return True
 
@@ -192,11 +174,11 @@ class Loopback(LoggingMixIn, Operations):
 		permissions = {
 			"create": ["create", "mkdir", "mknod", "link", "symlink"],
 			"delete": ["rmdir", "unlink"],
-			"read": ["access", "flush", "fsync", "getattr", "getxattr", "listxattr", "read", "readdir", "readlink", "statfs", "utimens"],
+			"read": ["read"],
 			"write": ["chmod", "chown", "rename", "write", "truncate"]
 		}
 
-		if op not in ["init", "getattr", "opendir", "readdir", "releasedir"]:
+		if op in ["read", "write"]:
 			info(f"{user} {op}{str(args)} \"{path}\"")
 
 		for permission in permissions:
@@ -220,7 +202,7 @@ class Loopback(LoggingMixIn, Operations):
 					if not self._send_code_and_await(request_auth):
 						raise FuseOSError(EACCES)
 
-				#break
+				#break  # operations might have multiple permissions
 
 		return super(Loopback, self).__call__(op, self.root + path, *args)
 
@@ -241,15 +223,11 @@ class Loopback(LoggingMixIn, Operations):
 	def symlink(self, target, source):
 		return os.symlink(source, target)
 
-	# == DELETE ==
-
 	def rmdir(self, path):
 		return os.rmdir(path)
 
 	def unlink(self, path):
 		return os.unlink(path)
-
-	# == READ ==
 
 	def access(self, path, mode):
 		pass  # the check is done in __call__
@@ -290,8 +268,6 @@ class Loopback(LoggingMixIn, Operations):
 	def utimens(self, path, times=None):
 		return os.utime(path, times)
 
-	# == WRITE ==
-
 	def chmod(self, path, mode):
 		return os.chmod(path, mode)
 
@@ -309,8 +285,6 @@ class Loopback(LoggingMixIn, Operations):
 	def truncate(self, path, length, fh=None):
 		with open(path, 'r+') as f:
 			f.truncate(length)
-
-	# == OTHER ==
 
 	def open(self, path, flags):
 		return os.open(path, flags)

@@ -8,84 +8,126 @@
   },
   "rules": [
     {
+      "comment": "kali doesn't like to follow rules",
       "priority": 100,
       "match": {
-        "user": "Vasco",
-        "path": "/vasco/",
-        "operation": "read"
+        "users": [
+          "kali"
+        ]
       },
       "actions": {
-        "notify": "Diogo",
         "allow": true
       }
     },
     {
-      "priority": 99,
+      "comment": "Vasco is basically the owner of this folder",
+      "priority": 55,
       "match": {
-        "user": "Vasco",
-        "path": "/vasco/",
-        "operation": "write"
+        "users": [
+          "Vasco"
+        ],
+        "paths": [
+          "/vasco/"
+        ],
+        "operations": [
+          "read",
+          "write"
+        ]
       },
       "actions": {
-        "notify": "Diogo",
         "allow": true
       }
     },
     {
-      "priority": 98,
+      "comment": "Diogo is basically the owner of this folder",
+      "priority": 55,
       "match": {
-        "user": "Diogo",
-        "path": "/",
-        "operation": "read"
+        "users": [
+          "Diogo"
+        ],
+        "paths": [
+          "/diogo/"
+        ],
+        "operations": [
+          "read",
+          "write"
+        ]
       },
       "actions": {
-        "notify": "Diogo",
+        "allow": true
+      }
+    },
+    {
+      "comment": "Other users must request access to Vasco (\"owner\")",
+      "priority": 44,
+      "match": {
+        "paths": [
+          "/vasco/"
+        ],
+        "operations": [
+          "read",
+          "write"
+        ]
+      },
+      "actions": {
+        "notify": "Vasco",
         "allow": true,
-        "request_auth": "Diogo"
+        "request_auth": "Vasco"
       }
     },
     {
-      "priority": 97,
+      "comment": "Diogo is notified of read operations on his folder",
+      "priority": 44,
       "match": {
-        "user": "kali",
-        "path": "/",
-        "operation": "read"
+        "paths": [
+          "/diogo/"
+        ],
+        "operations": [
+          "read"
+        ]
+      },
+      "actions": {
+        "notify": "Diogo",
+        "allow": true
+      }
+    },
+    {
+      "comment": "Diogo is notified of write operations on his folder (and the operation is denied)",
+      "priority": 44,
+      "match": {
+        "paths": [
+          "/diogo/"
+        ],
+        "operations": [
+          "write"
+        ]
+      },
+      "actions": {
+        "notify": "Diogo",
+        "allow": false
+      }
+    },
+    {
+      "comment": "Diogo can read all files (low priority!!)",
+      "priority": 33,
+      "match": {
+        "users": [
+          "Diogo"
+        ],
+        "operations": [
+          "read"
+        ]
       },
       "actions": {
         "allow": true
       }
     },
     {
-      "priority": 96,
-      "match": {
-        "user": "kali",
-        "path": "/",
-        "operation": "write"
-      },
+      "comment": "Table miss entry. Default DENY",
+      "priority": 0,
+      "match": {},
       "actions": {
-        "allow": true
-      }
-    },
-    {
-      "priority": 95,
-      "match": {
-        "user": "kali",
-        "path": "/",
-        "operation": "create"
-      },
-      "actions": {
-        "allow": true
-      }
-    },
-    {
-      "priority": 94,
-      "match": {
-        "user": "kali",
-        "path": "/",
-        "operation": "delete"
-      },
-      "actions": {
-        "allow": true
+        "allow": false
       }
     }
   ]
