@@ -2,7 +2,7 @@
 from __future__ import print_function, absolute_import, division
 
 import logging
-from logging import info
+from logging import info, error
 
 # Fuse:
 from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
@@ -13,6 +13,7 @@ from threading import Lock
 import pwd
 import grp
 import json
+from json import JSONDecodeError
 
 # Telegram:
 import telebot
@@ -55,11 +56,15 @@ class Loopback(LoggingMixIn, Operations):
 		self.root = realpath(root)
 		self.rwlock = Lock()
 
-		# Just checking if it's valid
-		self._load_rules()
-
-
-		# === TELEGRAM BOT ===
+		# Initialize rules (fallback in case of future formatting error)
+		try:
+			self._load_rules()
+		except OSError:
+			error("Rule file not found")
+			exit(-1)
+		except JSONDecodeError:
+			error("Rules file badly formatted")
+			exit(-2)
 
 		self.received_codes = {}
 
@@ -120,30 +125,36 @@ class Loopback(LoggingMixIn, Operations):
 				return False
 		return False
 
-
-	# === RULES ===
-
 	def _load_rules(self):
-		with open("rules1.json", "r") as f:
-			content = json.load(f)
-			self.config = content["config"]
-			self.contacts = content["contacts"]
-			self.rules = content["rules"]
-			self.rules.sort(key=lambda rule: rule["priority"], reverse=True)
+		try:
+			with open("rules1.json", "r") as f:
+				content = json.load(f)
+				self.config = content["config"]
+				self.contacts = content["contacts"]
+				self.rules = content["rules"]
+				self.rules.sort(key=lambda rule: rule["priority"], reverse=True)
+		except OSError or JSONDecodeError:
+			# retain old rules
+			pass
 
 	def _save_rules(self):
 		with open("rules1.json", "w") as f:
 			final = {"config": self.config, "contacts": self.contacts, "rules": self.rules}
 			f.write(json.dumps(final, indent=2))
 
-	def _matches(self, user, operation, path, match):
+	def _matches(self, user, group, operation, path, match):
 
 		musers = match.get("users")
+		mgroups = match.get("groups")
 		mops = match.get("operations")
 		mpaths = match.get("paths")
+		# add more as you see fit
 
 		if musers is not None:
 			if user not in musers:
+				return False
+		if mgroups is not None:
+			if group not in mgroups:
 				return False
 		if mops is not None:
 			if operation not in mops:
@@ -153,24 +164,25 @@ class Loopback(LoggingMixIn, Operations):
 				return False
 		return True
 
-	def _find_match(self, user, operation, path):
+	def _find_match(self, user, group, operation, path):
 		self._load_rules()
 
+		# return first match
 		for rule in self.rules:
-			if self._matches(user, operation, path, rule["match"]):
+			if self._matches(user, group, operation, path, rule["match"]):
 				return rule["actions"]
-
-
-	# === FUSE ===
 
 	def __call__(self, op, path, *args):
 		user = get_accessing_user()
 		group = get_accessing_group()
 
+		# yes, we could make a rule for root, but it would NEED to be in the rule file (fuse uses it), so we just hardcode it
 		if user == "root":
 			return super(Loopback, self).__call__(op, self.root + path, *args)
 
-		# temp
+		# group system calls in 4 basic permissions (read, write, create, and delete)
+		# those that are not here, are not intercepted
+		# can be more granular; you do you
 		permissions = {
 			"create": ["create", "mkdir", "mknod", "link", "symlink"],
 			"delete": ["rmdir", "unlink"],
@@ -178,19 +190,22 @@ class Loopback(LoggingMixIn, Operations):
 			"write": ["chmod", "chown", "rename", "write", "truncate"]
 		}
 
+		# log read and write attempts (anything else becomes too much)
 		if op in ["read", "write"]:
 			info(f"{user} {op}{str(args)} \"{path}\"")
 
 		for permission in permissions:
 			if op in permissions[permission]:
 
-				actions = self._find_match(user, permission, path)
+				actions = self._find_match(user, group, permission, path)
 				if actions is None:
 					raise FuseOSError(EACCES)
 
 				allow = actions.get("allow")
 				notify = actions.get("notify")
 				request_auth = actions.get("request_auth")
+
+				# actions in this order:
 
 				if notify is not None:
 					self._send_message(notify, f"{user} {op}{str(args)} \"{path}\" ({permission})")
@@ -206,7 +221,7 @@ class Loopback(LoggingMixIn, Operations):
 
 		return super(Loopback, self).__call__(op, self.root + path, *args)
 
-	# == CREATE ==
+	# Bellow here, it's basically the same
 
 	def create(self, path, mode, fi=None):
 		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
