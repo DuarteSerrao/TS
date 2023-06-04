@@ -127,7 +127,7 @@ class Loopback(LoggingMixIn, Operations):
 
 	def _load_rules(self):
 		try:
-			with open("rules1.json", "r") as f:
+			with open("rules.json", "r") as f:
 				content = json.load(f)
 				self.config = content["config"]
 				self.contacts = content["contacts"]
@@ -138,7 +138,7 @@ class Loopback(LoggingMixIn, Operations):
 			pass
 
 	def _save_rules(self):
-		with open("rules1.json", "w") as f:
+		with open("rules.json", "w") as f:
 			final = {"config": self.config, "contacts": self.contacts, "rules": self.rules}
 			f.write(json.dumps(final, indent=2))
 
