@@ -73,12 +73,13 @@ class Loopback(LoggingMixIn, Operations):
 		self.root = realpath(root)
 		self.rwlock = Lock()
 
-		self.cached_chat_id = {}
-		self.received_codes = {}
-
 		# Just checking if it's valid
-		with open("rules.json") as f:
-			self.rules = json.load(f)
+		self._load_rules()
+
+
+		# === TELEGRAM BOT ===
+
+		self.received_codes = {}
 
 		bot = telebot.TeleBot("5980867026:AAEx5ukcI67CGPOkD0f-qZK565xrLIhf_2Y")
 		self.bot = bot
@@ -90,161 +91,197 @@ class Loopback(LoggingMixIn, Operations):
 		def welcome_message(message):
 			user = message.from_user.first_name
 			chat_id = message.chat.id
+			self.contacts[user] = chat_id
 
-			self.cached_chat_id[user] = chat_id
+			self._save_rules()
 			info(" + " + str((user, chat_id)))
-
 			bot.send_message(chat_id, f"user: {user}\nchat_id: {chat_id}")
 
 		@bot.message_handler(commands=['code'])
 		def receive_code(message):
 			user = message.from_user.first_name
-			code = message.text.split(" ")[1]  # /code lsdhfkhdf
+			code = str(message.text).partition(" ")[2]  # /code lsdhfkhdf
 			self.received_codes[user] = code
+
+			info(" c " + str((user, code)))
 
 	def _start_bot(self):
 		self.bot.infinity_polling()
 
 	def _send_message(self, user, msg):
-		self.bot.send_message(self.cached_chat_id[user], msg)
+		self._load_rules()
+		self.bot.send_message(self.contacts[user], msg)
 
 	def _notify_users(self, msg):
-		for chat_id in self.cached_chat_id.values():
+		self._load_rules()
+		for chat_id in self.contacts.values():
 			self.bot.send_message(chat_id, msg)
 
-	def _send_code_and_await(self, user, code):
-		with open("rules.json") as f:
-			timeout = json.load(f)["auth_config"]["timeout"]
+	def _send_code_and_await(self, user):
+		self._load_rules()
+		timeout = self.config["timeout"]
 
-		self._send_message(user, f"Your code is {code}. Please respond within {timeout} seconds.")
+		code = _randomword(4)
+
+		self._send_message(user, f"Your code is {code}. Please respond within {timeout} seconds. Format: \"/code {'x'*len(code)}\"")
 
 		start_time = time.time()
 		while time.time() - start_time < timeout:  # wait according to the timeout value
 			if user not in self.received_codes:
 				time.sleep(1)
 			elif self.received_codes.get(user) == code:
-				self.received_codes.pop(user)
+				del self.received_codes[user]
 				return True
 			else:
+				del self.received_codes[user]
 				self._send_message(user, "Wrong code. Aborting")
 				return False
 		return False
 
-	def _check_access(self, user, operation, path, root=None):
-		if root is None:
-			root = self.root
 
-		# Read every time
-		with open("rules.json") as f:
-			self.rules = json.load(f)["rules"]
+	# === RULES ===
+
+	def _load_rules(self):
+		with open("rules1.json", "r") as f:
+			content = json.load(f)
+			self.config = content["config"]
+			self.contacts = content["contacts"]
+			self.rules = content["rules"]
+			self.rules.sort(key=lambda rule: rule["priority"], reverse=True)
+
+	def _save_rules(self):
+		with open("rules1.json", "w") as f:
+			final = {"config": self.config, "contacts": self.contacts, "rules": self.rules}
+			f.write(json.dumps(final, indent=2))
+
+	def _matches(self, user, operation, path, match):
+
+		muser = match.get("user")
+		mop = match.get("operation")
+		mpath = match.get("path")
+
+		if muser is not None:
+			if muser != user:
+				return False
+		if mop is not None:
+			if mop != operation:
+				return False
+		if mpath is not None:
+			if not str(path).startswith(mpath):
+				return False
+		return True
+
+	def _find_match(self, user, operation, path):
+		self._load_rules()
 
 		for rule in self.rules:
-			if (rule["username"] == user) and \
-					operation in rule["operations"] and \
-					any(path.startswith(root + p) for p in rule["paths"]):
-				return True
-		return False
-	
+			if self._matches(user, operation, path, rule["match"]):
+				return rule["actions"]
+
+
+	# === FUSE ===
 
 	def __call__(self, op, path, *args):
+		user = get_accessing_user()
+		group = get_accessing_group()
+
+		if user == "root":
+			return super(Loopback, self).__call__(op, self.root + path, *args)
+
+		# temp
+		permissions = {
+			"create": ["create", "mkdir", "mknod", "link", "symlink"],
+			"delete": ["rmdir", "unlink"],
+			"read": ["access", "flush", "fsync", "getattr", "getxattr", "listxattr", "read", "readdir", "readlink", "statfs", "utimens"],
+			"write": ["chmod", "chown", "rename", "write", "truncate"]
+		}
+
 		if op not in ["init", "getattr", "opendir", "readdir", "releasedir"]:
-			info(f"{get_accessing_user()} {op}{str(args)} {path}")
+			info(f"{user} {op}{str(args)} \"{path}\"")
+
+		for permission in permissions:
+			if op in permissions[permission]:
+
+				actions = self._find_match(user, permission, path)
+				if actions is None:
+					raise FuseOSError(EACCES)
+
+				allow = actions.get("allow")
+				notify = actions.get("notify")
+				request_auth = actions.get("request_auth")
+
+				if notify is not None:
+					self._send_message(notify, f"{user} {op}{str(args)} \"{path}\" ({permission})")
+
+				if not allow:
+					raise FuseOSError(EACCES)
+
+				if request_auth is not None:
+					if not self._send_code_and_await(request_auth):
+						raise FuseOSError(EACCES)
+
+				#break
+
 		return super(Loopback, self).__call__(op, self.root + path, *args)
 
+	# == CREATE ==
 
-	# === CREATE ===
 	def create(self, path, mode, fi=None):
-		if not self._check_access(get_accessing_user(), "create", path):
-			raise FuseOSError(EACCES)
 		return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-	
+
 	def mkdir(self, path, mode):
-		if not self._check_access(get_accessing_user(), "create", path):
-			raise FuseOSError(EACCES)
 		return os.mkdir(path, mode)
 
 	def mknod(self, path, mode, dev):
-		if not self._check_access(get_accessing_user(), "create", path):
-			raise FuseOSError(EACCES)
 		return os.mknod(path, mode, dev)
 
 	def link(self, target, source):
-		if not self._check_access(get_accessing_user(), "create", source):
-			raise FuseOSError(EACCES)
 		return os.link(self.root + source, target)
 
 	def symlink(self, target, source):
-		if not self._check_access(get_accessing_user(), "create", source):
-			raise FuseOSError(EACCES)
 		return os.symlink(source, target)
 
+	# == DELETE ==
 
-	# === DELETE ===
 	def rmdir(self, path):
-		if not self._check_access(get_accessing_user(), "delete", path):
-			raise FuseOSError(EACCES)
 		return os.rmdir(path)
-	
+
 	def unlink(self, path):
-		if not self._check_access(get_accessing_user(), "delete", path):
-			raise FuseOSError(EACCES)
 		return os.unlink(path)
 
+	# == READ ==
 
-	# === READ ===
 	def access(self, path, mode):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
-		#if not os.access(path, mode):
-		#	raise FuseOSError(EACCES)
+		pass  # the check is done in __call__
 
 	def flush(self, path, fh):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		return os.fsync(fh)
 
 	def fsync(self, path, datasync, fh):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
-		if datasync != 0:
-			return os.fdatasync(fh)
-		else:
-			return os.fsync(fh)
+		return os.fdatasync(fh) if datasync != 0 else os.fsync(fh)
 
 	def getattr(self, path, fh=None):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		st = os.lstat(path)
 		return dict((key, getattr(st, key)) for key in (
 			'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
 			'st_nlink', 'st_size', 'st_uid'))
 
-	def getxattr(self, path, name, position=0):
-		return None
+	getxattr = None
 
-	def listxattr(self, path):
-		return None
+	listxattr = None
 
 	def read(self, path, size, offset, fh):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		with self.rwlock:
 			os.lseek(fh, offset, 0)
 			return os.read(fh, size)
 
 	def readdir(self, path, fh):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		return ['.', '..'] + os.listdir(path)
-	
+
 	def readlink(self, path):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		return os.readlink(path)
 
 	def statfs(self, path):
-		if not self._check_access(get_accessing_user(), "read", path):
-			raise FuseOSError(EACCES)
 		stv = os.statvfs(path)
 		return dict((key, getattr(stv, key)) for key in (
 			'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail',
@@ -253,62 +290,30 @@ class Loopback(LoggingMixIn, Operations):
 	def utimens(self, path, times=None):
 		return os.utime(path, times)
 
+	# == WRITE ==
 
-	# === WRITE ===
 	def chmod(self, path, mode):
-		if not self._check_access(get_accessing_user(), "write", path):
-			raise FuseOSError(EACCES)
 		return os.chmod(path, mode)
 
 	def chown(self, path, uid, gid):
-		if not self._check_access(get_accessing_user(), "write", path):
-			raise FuseOSError(EACCES)
 		return os.chown(path, uid, gid)
 
 	def rename(self, old, new):
-		if not self._check_access(get_accessing_user(), "write", old, root=""):
-			raise FuseOSError(EACCES)
 		return os.rename(old, self.root + new)
 
 	def write(self, path, data, offset, fh):
-		if not self._check_access(get_accessing_user(), "write", path):
-			raise FuseOSError(EACCES)
 		with self.rwlock:
 			os.lseek(fh, offset, 0)
 			return os.write(fh, data)
 
 	def truncate(self, path, length, fh=None):
-		if not self._check_access(get_accessing_user(), "write", path):
-			raise FuseOSError(EACCES)
 		with open(path, 'r+') as f:
 			f.truncate(length)
 
+	# == OTHER ==
 
-	# === OTHER ===
 	def open(self, path, flags):
-		user = get_accessing_user()
-		group = get_accessing_group()
-
-		slflags = get_flag_slist(flags)
-
-		# debug
-		self._notify_users(f"User {user} from group {group} is trying to access {path}.\nFlags: {str(slflags)}.")
-
-		# must be allowed to use every flag
-		for flag in slflags:
-			if not self._check_access(user, flag, path):
-				raise FuseOSError(EACCES)
-
-		# allow directly if no cached user to notify (2FA disabled)
-		if user not in self.cached_chat_id:
-			return os.open(path, flags)
-
-		# sends code and waits for response
-		code = _randomword(4)
-		if self._send_code_and_await(user, code):
-			return os.open(path, flags)
-
-		raise FuseOSError(EACCES)
+		return os.open(path, flags)
 
 	def release(self, path, fh):
 		return os.close(fh)
