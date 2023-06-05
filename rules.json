@@ -4,7 +4,8 @@
   },
   "contacts": {
     "Vasco": 5104810515,
-    "Diogo": 1687790372
+    "Diogo": 1687790372,
+    "Duarte": 1111
   },
   "rules": [
     {
@@ -58,6 +59,25 @@
       }
     },
     {
+      "comment": "Duarte is basically the owner of this folder",
+      "priority": 55,
+      "match": {
+        "users": [
+          "Duarte"
+        ],
+        "paths": [
+          "/duarte/"
+        ],
+        "operations": [
+          "read",
+          "write"
+        ]
+      },
+      "actions": {
+        "allow": true
+      }
+    },
+    {
       "comment": "Other users must request access to Vasco (\"owner\")",
       "priority": 44,
       "match": {
@@ -92,18 +112,18 @@
       }
     },
     {
-      "comment": "Diogo is notified of write operations on his folder (and the operation is denied)",
+      "comment": "Duarte is notified of write operations on his folder (and the operation is denied)",
       "priority": 44,
       "match": {
         "paths": [
-          "/diogo/"
+          "/duarte/"
         ],
         "operations": [
           "write"
         ]
       },
       "actions": {
-        "notify": "Diogo",
+        "notify": "Duarte",
         "allow": false
       }
     },
