@@ -3,6 +3,7 @@ from __future__ import print_function, absolute_import, division
 
 import logging
 from logging import info, error
+from logging.handlers import SysLogHandler
 
 # Fuse:
 from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
@@ -56,14 +57,21 @@ class Loopback(LoggingMixIn, Operations):
 		self.root = realpath(root)
 		self.rwlock = Lock()
 
-		# Initialize rules (fallback in case of future formatting error)
+		# Initialize rsyslog
+		syslog = SysLogHandler(address=('localhost', 514))
+		format = logging.Formatter('%(name)s: %(levelname)s %(message)s')
+		syslog.setFormatter(format)
+		self.rsyslog = logging.getLogger()
+		self.rsyslog.addHandler(syslog)
+		self.rsyslog.setLevel(logging.INFO)
+
 		try:
 			self._load_rules()
 		except OSError:
-			error("Rule file not found")
+			self.rsyslog.error("Rule file not found")
 			exit(-1)
 		except JSONDecodeError:
-			error("Rules file badly formatted")
+			self.rsyslog.error("Rules file badly formatted")
 			exit(-2)
 
 		self.received_codes = {}
@@ -72,7 +80,7 @@ class Loopback(LoggingMixIn, Operations):
 		self.bot = bot
 		bot_thread = Thread(target=self._start_bot)
 		bot_thread.start()
-		info("Telegram bot started")
+		self.rsyslog.info("Telegram bot started")
 
 		@bot.message_handler(commands=['start'])
 		def welcome_message(message):
@@ -81,7 +89,7 @@ class Loopback(LoggingMixIn, Operations):
 			self.contacts[user] = chat_id
 
 			self._save_rules()
-			info(" + " + str((user, chat_id)))
+			self.rsyslog.info(" + " + str((user, chat_id)))
 			bot.send_message(chat_id, f"user: {user}\nchat_id: {chat_id}")
 
 		@bot.message_handler(commands=['code'])
@@ -90,7 +98,7 @@ class Loopback(LoggingMixIn, Operations):
 			code = str(message.text).partition(" ")[2]  # /code lsdhfkhdf
 			self.received_codes[user] = code
 
-			info(" c " + str((user, code)))
+			self.rsyslog.info(" c " + str((user, code)))
 
 	def _start_bot(self):
 		self.bot.infinity_polling()
