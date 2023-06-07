@@ -2,7 +2,6 @@
 from __future__ import print_function, absolute_import, division
 
 import logging
-from logging import info, error
 from logging.handlers import SysLogHandler
 
 # Fuse:
@@ -61,14 +60,15 @@ class Loopback(LoggingMixIn, Operations):
 		syslog = SysLogHandler(address=('localhost', 514))
 		format = logging.Formatter('%(name)s: %(levelname)s %(message)s')
 		syslog.setFormatter(format)
+
 		self.rsyslog = logging.getLogger()
 		self.rsyslog.addHandler(syslog)
-		self.rsyslog.setLevel(logging.INFO)
 
+		# Initialize rules (fallback in case of future formatting error)
 		try:
 			self._load_rules()
 		except OSError:
-			self.rsyslog.error("Rule file not found")
+			self.rsyslog.error("Rules file not found")
 			exit(-1)
 		except JSONDecodeError:
 			self.rsyslog.error("Rules file badly formatted")
@@ -200,7 +200,7 @@ class Loopback(LoggingMixIn, Operations):
 
 		# log read and write attempts (anything else becomes too much)
 		if op in ["read", "write"]:
-			info(f"{user} {op}{str(args)} \"{path}\"")
+			self.rsyslog.info(f"{user} {op}{str(args)} \"{path}\"")
 
 		for permission in permissions:
 			if op in permissions[permission]:
